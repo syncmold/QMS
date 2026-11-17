@@ -467,8 +467,23 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V193';   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
+const APP_VER = 'V195';
+// V195：大廳帶票（#sso=票）——一開頁就讀出來並從網址清掉（票不留在網址列、上一頁、書籤）
+const _qmsSsoTk = (() => {
+  try {
+    const m = /(?:^#|&)sso=([^&]+)/.exec(location.hash || '');
+    if (!m) return '';
+    history.replaceState(null, '', location.pathname + location.search);
+    return decodeURIComponent(m[1]);
+  } catch (e) { return ''; }
+})();   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
+// ══ V195（261117 使用者「OK」；設計稿 QMS_大廳免打密碼收票登入_設計稿_261117.md）——
+//    從 SyncHub 大廳點 QMS 卡片免打密碼：大廳開「QMS 網址#sso=票」→ 開頁讀票、立刻從網址清掉 →
+//    向 synchub sso-exchange 換成 synchub 身分 → 交給代驗後端 qms-sso-login-v3 的 sso_hub 動作（v3-2）→
+//    後端確認是誰、照密碼登入同一套規則判斷 QMS 授權，過了才簽 QMS 通行證 → 走跟密碼登入一樣的後續。
+//    換不到（票過期／用過、QMS 開關沒打開、連不上）＝照常顯示登入頁；不准進＝顯示跟密碼登入同樣的原因。
+//    synchub 身分用完就丟、不存。doLogin 的進入主畫面段落抽成 qmsEnterInternal（兩條路共用，不重複寫）。══
 // ══ V193（261113 合併版）＝V191（查詢頁 NCR 清單＋修改）＋V190（名單改登入後才讀）。
 //    V190 沒上線過；synchub 專用通道 261113 上線後，以 V191 為底用三方合併套進 V190 的改動（衝突只有這段說明）。
 //    要搭配：SQL 192（人員同步表）＋代驗後端 qms-sso-login-v3。══
@@ -10345,6 +10360,52 @@ async function sbGateCheck(token) {
   }
 }
 
+// ══ V195：從 SyncHub 大廳點進來（#sso=票）══
+//  回 false＝沒處理（換不到票：照常顯示登入頁、不報錯）；true＝已處理（進主畫面，或已顯示原因）。
+//  原本若有人登入著：成功＝換成大廳這個人（enterSystem 會清掉上一個人的快取）；失敗＝原本的登入不動。
+async function qmsSsoHubEnter(tk) {
+  const btn = document.getElementById('login-btn');
+  const loginShown = () => { const el = document.getElementById('login-screen'); return !!el && getComputedStyle(el).display !== 'none'; };
+  const say = (msg) => { if (loginShown()) showLoginErr(msg); else { try { showSyncToast('⚠ ' + msg, true); } catch (e) { alert(msg); } } };
+  const withTimeout = async (url, init, ms) => {
+    const ac = (typeof AbortController === 'function') ? new AbortController() : null;
+    const t = ac ? setTimeout(() => ac.abort(), ms) : 0;
+    try { return await fetch(url, Object.assign({}, init, ac ? { signal: ac.signal } : {})); } finally { if (t) clearTimeout(t); }
+  };
+  if (btn) btn.textContent = '⏳ 從 SyncHub 大廳帶入身分…';
+  try {
+    // ① 票 → synchub 身分（票 60 秒、只能用一次；401 票無效、403 QMS 還沒開放大廳免打密碼）
+    let hub = null;
+    try {
+      const res = await withTimeout(OMS_IDENTITY_URL + '/functions/v1/sso-exchange', {
+        method: 'POST', headers: { 'apikey': OMS_IDENTITY_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket: tk, system: 'QMS' }) }, 10000);
+      if (res.ok) { const d = await res.json().catch(() => null); if (d && d.ok === true && d.access_token) hub = d.access_token; }
+    } catch (e) { hub = null; }
+    if (!hub) return false;
+    // ② synchub 身分 → 代驗後端判斷授權、簽 QMS 通行證（後端回的格式同密碼登入）
+    let d = null;
+    try {
+      const res = await withTimeout(SUPABASE_URL + '/functions/v1/' + SSO_LOGIN_FN, {
+        method: 'POST', headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sso_hub', hub_token: hub, system: 'QMS' }) }, 15000);
+      if (res.ok) d = await res.json().catch(() => null);
+    } catch (e) { d = null; }
+    hub = null;   // 用完就丟
+    if (!d) { say(MSG_SSO_DOWN); return true; }
+    if (d.mode === 'deny') { say(ssoDenyMsg(d.reason)); return true; }
+    if (d.mode !== 'sso' || !d.access_token) { if (d.reason === 'down') { say(MSG_SSO_DOWN); return true; } return false; }
+    // ③ 跟密碼登入同一套後續檢查（後端已判斷 OMS 授權）
+    const r = await sbAuthAfterToken(d.access_token, d.refresh_token, d.user_id, false, true);
+    if (!r.ok) { say(r.msg); return true; }
+    if (!isInternalProfile(r.profile)) { say('從大廳免打密碼只給內部同仁使用，請用帳號密碼登入'); return true; }
+    qmsEnterInternal(r, String(d.email || '').trim().toLowerCase(), true);
+    return true;
+  } finally {
+    if (btn) btn.textContent = '登入 Login';
+  }
+}
+
 // 修改密碼：先用舊密碼重新驗證，再透過 Auth 更新
 async function sbAuthChangePassword(email, oldPwd, newPwd) {
   const v = await sbAuthLogin(email, oldPwd);
@@ -10721,6 +10782,12 @@ async function doLogin() {
   if (!siteHidden && site && p.site_code && site !== p.site_code) {
     showLoginErr('此帳號不屬於所選組織，請改選「' + p.site_code + '」'); return;
   }
+  qmsEnterInternal(r, email, viaSso);
+}
+
+// V195：內部同仁（含 TEST 帳號等走 doLogin 這條的）通過檢查後進主畫面——密碼登入與大廳收票共用
+function qmsEnterInternal(r, email, viaSso) {
+  const p = r.profile;
   const realSite = p.site_code || '__nosite__';
   const role     = p.qms_role || 'inspector';
 
@@ -13684,6 +13751,7 @@ try {
 if (currentLang !== 'zh-TW') setLang(currentLang);
 else applyI18n();
 checkSession();
+if (_qmsSsoTk) qmsSsoHubEnter(_qmsSsoTk).catch(e => console.warn('大廳收票登入失敗', e));   // V195
 // 🔐 _2CODE：JWT 自動續期 — 啟動定時續期（每45分鐘）；若重整後仍登入，立即先續一次避免過期
 startTokenAutoRefresh();
 try { if (getSession() && getSession().token) sbRefreshToken(); } catch(e) {}
