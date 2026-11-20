@@ -467,7 +467,7 @@ input.spec-inp[type=number] { -moz-appearance:textfield; appearance:textfield; }
 // 用途＝跟使用者溝通「你看到的畫面是不是最新版」，不是品質文件的表單版次
 //（表單版次 Rev 另有其用途、目前維持 V1.0 不動，日後各廠區若有自己的表單版次需求再談）
 // 顯示位置：① 瀏覽器分頁標題 ② 登入畫面副標下方 ③ 主畫面右上（列印時自動隱藏）
-const APP_VER = 'V195';
+const APP_VER = 'V196';
 // V195：大廳帶票（#sso=票）——一開頁就讀出來並從網址清掉（票不留在網址列、上一頁、書籤）
 const _qmsSsoTk = (() => {
   try {
@@ -478,6 +478,10 @@ const _qmsSsoTk = (() => {
   } catch (e) { return ''; }
 })();   // ★★ 每出一版必須同步改這一行（比照 MHR 的做法），否則畫面版號會對不上檔案版號
 
+// ══ V196（261120 使用者「請現在改吧」）——資料表改用新名（表加前綴第二段）：
+//    QMS-MHR 專案 fai_records→qms_fai_records、cpk_records→qms_cpk_records、part_specs→qms_part_specs、
+//    profiles→qms_profiles；跨專案讀 synchub 的 factories→oms_factories。舊名在資料庫留有替身，舊版照樣能用。
+//    資料庫裡的限制名稱（例如 part_specs_pkey、cpk_records_local_key_key）改表名時不會跟著變，錯誤判斷照舊比對。══
 // ══ V195（261117 使用者「OK」；設計稿 QMS_大廳免打密碼收票登入_設計稿_261117.md）——
 //    從 SyncHub 大廳點 QMS 卡片免打密碼：大廳開「QMS 網址#sso=票」→ 開頁讀票、立刻從網址清掉 →
 //    向 synchub sso-exchange 換成 synchub 身分 → 交給代驗後端 qms-sso-login-v3 的 sso_hub 動作（v3-2）→
@@ -534,7 +538,7 @@ let _sbReady = false;
 
 async function sbTestConnection() {
   try {
-    const res = await fetch(SUPABASE_URL + '/rest/v1/fai_records?limit=1', {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_fai_records?limit=1', {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() }
     });
     return res.ok || res.status === 406;
@@ -596,7 +600,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
     if (isUpdate) {
       // 先用 local_key 比對 PATCH
       let pRes = await fetch(
-        SUPABASE_URL + '/rest/v1/fai_records?local_key=eq.' + encodeURIComponent(key),
+        SUPABASE_URL + '/rest/v1/qms_fai_records?local_key=eq.' + encodeURIComponent(key),
         { method: 'PATCH',
           headers: {
             'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
@@ -607,7 +611,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
       // 若 local_key 對不到（舊資料），改用 form_no 備援 PATCH
       if ((!patched || patched.length === 0) && data.formNo) {
         pRes = await fetch(
-          SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(data.formNo),
+          SUPABASE_URL + '/rest/v1/qms_fai_records?form_no=eq.' + encodeURIComponent(data.formNo),
           { method: 'PATCH',
             headers: {
               'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
@@ -621,7 +625,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
         // ⚠ V170-2：這支補救 POST 原本**完全不看 res.ok**，失敗也照印「☁ FAI 已更新(覆蓋)」。
         //   覆蓋原單走的就是這條路（歷史查詢→編輯→覆蓋），是三個呼叫點裡後果最重的一個：
         //   雲端沒更新，畫面卻綠字「✅ 已更新原記錄」，接著清表＋切到歷史頁。
-        const cRes = await fetch(SUPABASE_URL + '/rest/v1/fai_records', {
+        const cRes = await fetch(SUPABASE_URL + '/rest/v1/qms_fai_records', {
           method: 'POST',
           headers: {
             'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
@@ -639,7 +643,7 @@ async function sbSaveFaiRecord(key, data, isUpdate) {
     }
 
     // ── 新記錄：維持原本 POST ──
-    const res = await fetch(SUPABASE_URL + '/rest/v1/fai_records', {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_fai_records', {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -679,17 +683,17 @@ async function sbSaveCpkRecord(key, data, isUpdate) {
     const H = { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Content-Type': 'application/json' };
     // ── 覆蓋原單：PATCH 既有列（仿 FAI）；local_key 對不到改用 form_no；都對不到才 POST ──
     if (isUpdate) {
-      let pRes = await fetch(SUPABASE_URL + '/rest/v1/cpk_records?local_key=eq.' + encodeURIComponent(key),
+      let pRes = await fetch(SUPABASE_URL + '/rest/v1/qms_cpk_records?local_key=eq.' + encodeURIComponent(key),
         { method: 'PATCH', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(payload) });
       let patched = pRes.ok ? await pRes.json() : [];
       if ((!patched || patched.length === 0) && data.formNo) {
-        pRes = await fetch(SUPABASE_URL + '/rest/v1/cpk_records?form_no=eq.' + encodeURIComponent(data.formNo),
+        pRes = await fetch(SUPABASE_URL + '/rest/v1/qms_cpk_records?form_no=eq.' + encodeURIComponent(data.formNo),
           { method: 'PATCH', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(payload) });
         patched = pRes.ok ? await pRes.json() : [];
       }
       if (!patched || patched.length === 0) {
         // ⚠ V170-2：同 FAI，這支補救 POST 原本不看 res.ok（見 sbSaveFaiRecord 的說明）
-        const cRes = await fetch(SUPABASE_URL + '/rest/v1/cpk_records',
+        const cRes = await fetch(SUPABASE_URL + '/rest/v1/qms_cpk_records',
           { method: 'POST', headers: { ...H, 'Prefer': 'resolution=merge-duplicates' }, body: JSON.stringify(payload) });
         if (!cRes.ok) {
           const t = await cRes.text();
@@ -700,7 +704,7 @@ async function sbSaveCpkRecord(key, data, isUpdate) {
       console.log('☁ CPK 已更新(覆蓋):', data.formNo || key);
       return true;
     }
-    const res = await fetch(SUPABASE_URL + '/rest/v1/cpk_records',
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_cpk_records',
       { method: 'POST', headers: { ...H, 'Prefer': 'resolution=merge-duplicates' }, body: JSON.stringify(payload) });
     if (!res.ok) {
       const t = await res.text();
@@ -743,7 +747,7 @@ async function sbSavePartSpec(partno, spec, scope) {
     //    第二段 SQL 拿掉舊主鍵之後，舊寫法 on_conflict=partno,scope 會直接報錯（找不到對應的唯一鍵），這個不會。
     //  ⚠ 所以 **178 第一段 SQL 一定要先跑**，這版才能上線（沒有這個唯一鍵，這裡會報錯、存不了檔）。
     //  編輯時版本欄鎖住（見 editPn），同一筆存回去的一定是同一個版本 ⇒ 不會因為改版本欄而多出一列。
-    const res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?on_conflict=partno,scope,rev', {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/qms_part_specs?on_conflict=partno,scope,rev', {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -820,7 +824,7 @@ async function sbPullAllRecords() {
   try {
     // V140：改分頁撈全部（原 limit=500 → 超過 500 筆就看不到更舊的記錄）
     // V176：order 補 id 收尾（saved_at 會同值）＋用 id 去重核對總數；下面「保留最新」仍靠 saved_at.desc 在前
-    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/fai_records?select=*&order=saved_at.desc,id.desc',
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/qms_fai_records?select=*&order=saved_at.desc,id.desc',
       { key: r => String(r.id) });
     let count = 0;
     const _seen = new Set(); // v118: 去重，保留最新（資料已按 saved_at desc 排序）
@@ -867,7 +871,7 @@ async function sbPullCpkRecords() {
   try {
     // V140：改分頁撈全部（原 limit=200 → 超過 200 筆就看不到更舊的 CPK）
     // V176：同 FAI——order 補 id 收尾＋用 id 去重核對總數
-    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/cpk_records?select=*&order=saved_at.desc,id.desc',
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/qms_cpk_records?select=*&order=saved_at.desc,id.desc',
       { key: r => String(r.id) });
     let count = 0;
     const _seen = new Set(); // v121: 去重，保留最新
@@ -898,7 +902,7 @@ async function sbPullPartSpecs() {
     // V176：原本完全沒 order ⇒ 換頁邊界不穩。主鍵＝(partno, scope)（V145 遷移），就用它排序與去重
     // V177-1：料號改版過渡——第二段 SQL 之後同一料號同一廠區可能有好幾個版本 ⇒
     //  排序與去重都要帶版本，否則去重會把不同版本當成重複刪掉、再跟總數對不上而整段報錯（V176 的總數核對）。
-    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/part_specs?select=*&order=partno.asc,scope.asc,rev.asc',
+    const data = await sbFetchAllRows(SUPABASE_URL + '/rest/v1/qms_part_specs?select=*&order=partno.asc,scope.asc,rev.asc',
       { key: r => String(r.partno) + '\u0001' + String(r.scope) + '\u0001' + String(r.rev == null ? '' : r.rev) });
 
     // ══ V178：本機清單＝雲端原樣（每一版一列，停用的也在；誰看得到哪些由資料庫權限決定）══
@@ -956,7 +960,7 @@ async function sbDeleteFaiRecord(localKey) {
   try {
     // 先用 local_key 刪除
     const r1 = await fetch(
-      SUPABASE_URL + '/rest/v1/fai_records?local_key=eq.' + encodeURIComponent(localKey),
+      SUPABASE_URL + '/rest/v1/qms_fai_records?local_key=eq.' + encodeURIComponent(localKey),
       { method: 'DELETE',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
@@ -966,7 +970,7 @@ async function sbDeleteFaiRecord(localKey) {
       const rec = JSON.parse(localStorage.getItem(localKey) || '{}');
       if (rec.formNo) {
         await fetch(
-          SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(rec.formNo),
+          SUPABASE_URL + '/rest/v1/qms_fai_records?form_no=eq.' + encodeURIComponent(rec.formNo),
           { method: 'DELETE',
             headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
         );
@@ -982,7 +986,7 @@ async function sbDeleteCpkRecord(localKey, recData) {
   try {
     // 先用 local_key 刪除
     await fetch(
-      SUPABASE_URL + '/rest/v1/cpk_records?local_key=eq.' + encodeURIComponent(localKey),
+      SUPABASE_URL + '/rest/v1/qms_cpk_records?local_key=eq.' + encodeURIComponent(localKey),
       { method: 'DELETE',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     );
@@ -990,7 +994,7 @@ async function sbDeleteCpkRecord(localKey, recData) {
     const fno = recData?.formNo;
     if (fno) {
       await fetch(
-        SUPABASE_URL + '/rest/v1/cpk_records?form_no=eq.' + encodeURIComponent(fno),
+        SUPABASE_URL + '/rest/v1/qms_cpk_records?form_no=eq.' + encodeURIComponent(fno),
         { method: 'DELETE',
           headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
       );
@@ -2939,7 +2943,7 @@ async function sbSaveSpecRow(partno, scope, spec) {
   };
   let res;
   try {
-    res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?on_conflict=partno,scope,rev', {
+    res = await fetch(SUPABASE_URL + '/rest/v1/qms_part_specs?on_conflict=partno,scope,rev', {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Content-Type': 'application/json',
                  'Prefer': 'resolution=merge-duplicates,return=representation' },
@@ -2960,7 +2964,7 @@ async function sbSetSpecActive(partno, scope, rev, makeActive) {
     : { active: false, deactivated_at: new Date().toISOString(), deactivated_by: who };
   let res;
   try {
-    res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(partno)
+    res = await fetch(SUPABASE_URL + '/rest/v1/qms_part_specs?partno=eq.' + encodeURIComponent(partno)
         + '&scope=eq.' + encodeURIComponent(scope) + '&rev=eq.' + encodeURIComponent(rev), {
       method: 'PATCH',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Content-Type': 'application/json',
@@ -2978,7 +2982,7 @@ async function sbSetSpecActive(partno, scope, rev, makeActive) {
 async function sbDeleteSpecRow(partno, scope, rev) {
   let res;
   try {
-    res = await fetch(SUPABASE_URL + '/rest/v1/part_specs?partno=eq.' + encodeURIComponent(partno)
+    res = await fetch(SUPABASE_URL + '/rest/v1/qms_part_specs?partno=eq.' + encodeURIComponent(partno)
         + '&scope=eq.' + encodeURIComponent(scope) + '&rev=eq.' + encodeURIComponent(rev), {
       method: 'DELETE',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(), 'Prefer': 'return=representation' }
@@ -5325,7 +5329,7 @@ function getAllRecords() {
         d.overall = overall;
         try { localStorage.setItem(k, JSON.stringify(d)); } catch(e) {}
         if (_sbReady && d.formNo) {
-          fetch(SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(d.formNo), {
+          fetch(SUPABASE_URL + '/rest/v1/qms_fai_records?form_no=eq.' + encodeURIComponent(d.formNo), {
             method: 'PATCH',
             headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer(),
               'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
@@ -6163,7 +6167,7 @@ function deleteRecord(key) {
   sbDeleteFaiRecord(key).catch(e => console.warn('雲端刪除失敗:', e));
   if (recData?.formNo) {
     // 額外用 form_no 再確認刪一次（防止 local_key 欄位是空的舊資料漏刪）
-    fetch(SUPABASE_URL + '/rest/v1/fai_records?form_no=eq.' + encodeURIComponent(recData.formNo),
+    fetch(SUPABASE_URL + '/rest/v1/qms_fai_records?form_no=eq.' + encodeURIComponent(recData.formNo),
       { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': sbAuthBearer() } }
     ).catch(e => console.warn('雲端 form_no 備援刪除失敗:', e));
   }
@@ -8693,7 +8697,7 @@ let _scopeEditEmail = null;
 async function loadOmsBuList() {
   // 讀 OMS factories 的 BU→廠區 對照（唯讀、同一把公開金鑰，跟 loadOmsQmsRoster 同一條路）
   try {
-    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/factories?select=code,name,bu&active=eq.true&order=bu,code&limit=1000',
+    const r = await fetch(OMS_IDENTITY_URL + '/rest/v1/oms_factories?select=code,name,bu&active=eq.true&order=bu,code&limit=1000',
       { headers: { apikey: OMS_IDENTITY_KEY, Authorization: 'Bearer ' + OMS_IDENTITY_KEY } });
     if (!r.ok) return [];
     const rows = await r.json();
@@ -9850,7 +9854,7 @@ async function qmsExportLoadOms() {
                        if (e.email) out.empByEmail[String(e.email).trim().toLowerCase()] = e; });
   } catch (e) { out.empErr = (e && e.message) || String(e); }
   try {
-    const fa = await sbFetchAllRows(OMS_IDENTITY_URL + '/rest/v1/factories?select=code,bu&order=code.asc', { headers: H, key: r => String(r.code) });
+    const fa = await sbFetchAllRows(OMS_IDENTITY_URL + '/rest/v1/oms_factories?select=code,bu&order=code.asc', { headers: H, key: r => String(r.code) });
     if (!fa.length) throw new Error('讀到 0 筆');
     fa.forEach(f => { if (f.code) out.buByFac[String(f.code).trim().toUpperCase()] = f.bu || ''; });
   } catch (e) { out.facErr = (e && e.message) || String(e); }
@@ -10230,7 +10234,7 @@ async function sbAuthLogin(email, password) {
 async function sbAuthAfterToken(token, refresh, uid, mustChange, ssoChecked) {   // V190：ssoChecked＝代驗後端已判斷過 OMS 授權
   try {
     const pRes = await fetch(
-      SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(uid) + '&select=*&limit=1',
+      SUPABASE_URL + '/rest/v1/qms_profiles?id=eq.' + encodeURIComponent(uid) + '&select=*&limit=1',
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + token } }
     );
     const pData = pRes.ok ? await pRes.json().catch(() => []) : [];
@@ -12366,7 +12370,7 @@ async function _cpkDoSave(overwriteKey) {
     // 覆蓋 → 沿用原 formNo/savedAt/savedBy 並記錄修改者；另存 → 用新 formNo
     savedAt:   overwriteKey ? (existing.savedAt || now.toISOString()) : now.toISOString(),
     savedBy:   overwriteKey ? (existing.savedBy || (s?.userName || '—')) : (s?.userName || '—'),
-    formNo:    overwriteKey ? (existing.formNo || await generateFormNoAsync('CPK','cpk_records')) : await generateFormNoAsync('CPK','cpk_records'),
+    formNo:    overwriteKey ? (existing.formNo || await generateFormNoAsync('CPK','qms_cpk_records')) : await generateFormNoAsync('CPK','qms_cpk_records'),
     ...(s?.isSupplier ? { supplierCode: s.supplierCode } : {}),
     ...(overwriteKey ? { updatedAt: now.toISOString(), updatedBy: s?.userName || '—' } : {}),
   };
@@ -12490,7 +12494,7 @@ function generateFormNo(process) {
 
 // ══ 雲端發號（v124）══
 // 先查 Supabase 當天同 prefix 已存在的最大流水號，+1 後回傳，避免跨裝置/清快取造成重複。
-// table: 'fai_records' 或 'cpk_records'。雲端查詢失敗時 fallback 用本機計數器 + 時間後綴。
+// table: 'qms_fai_records' 或 'qms_cpk_records'（V196 起用新名）。雲端查詢失敗時 fallback 用本機計數器 + 時間後綴。
 async function generateFormNoAsync(process, table) {
   const now = new Date();
   const yy  = String(now.getFullYear()).slice(2);
@@ -12501,7 +12505,7 @@ async function generateFormNoAsync(process, table) {
   const site   = getCurrentSite() || (_fs?.isSupplier ? _fs.supplierCode : '') || (_fs?.isAdmin ? 'ADMIN' : '');
   const prefix = site ? `${site}-${process}` : process;
   const counterKey = FORMNO_KEY + '_' + prefix + '_' + ymd;
-  const tbl = table || 'fai_records';
+  const tbl = table || 'qms_fai_records';
 
   // 先取本機計數器當基準（離線備援）
   let localSeq = 1;
@@ -12642,7 +12646,7 @@ function submitRecord() {
 }
 
 async function _doSaveNewRecord(header, now, overall, updatedBy) {
-  const formNo = await generateFormNoAsync(currentProcess, 'fai_records');
+  const formNo = await generateFormNoAsync(currentProcess, 'qms_fai_records');
   const _sess  = getSession();
   const _rawSite = getCurrentSite();
   const site   = _rawSite || (_sess?.isSupplier ? _sess.supplierCode : '') || (_sess?.isAdmin ? 'ADMIN' : (_sess?.site || ''));
